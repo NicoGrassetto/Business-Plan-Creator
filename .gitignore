@@ -66,3 +66,22 @@ Thumbs.db
 # Deep Agents file system (stored research/context)
 .deepagents/
 agent_files/
+
+# Node.js (for root node_modules if present)
+node_modules/
+package-lock.json
+
+# Azure Functions
+local.settings.json
+.funcignore
+
+# Test files
+test_results/
+.coverage
+htmlcov/
+
+# Temporary files
+*.tmp
+*.bak
+*.swp
+*~
