@@ -13,7 +13,6 @@ based on the nature of the request.
 import os
 import sys
 import time
-import logging
 from pathlib import Path
 from typing import Literal
 from datetime import datetime
@@ -23,21 +22,6 @@ from azure.identity import DefaultAzureCredential, get_bearer_token_provider
 from duckduckgo_search import DDGS
 from deepagents import create_deep_agent
 from langchain_openai import AzureChatOpenAI
-
-# ============================================================================
-# LOGGING CONFIGURATION
-# ============================================================================
-
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.StreamHandler(sys.stdout),
-        logging.FileHandler('deep_agents.log')
-    ]
-)
-
-logger = logging.getLogger(__name__)
 
 # ============================================================================
 # ENVIRONMENT & CONFIGURATION
@@ -65,35 +49,34 @@ def load_configuration():
     
     if not config['endpoint'] or not config['deployment_name']:
         logger.error("Missing required environment variables")
-        logger.error(f"AZURE_OPENAI_ENDPOINT: {config['endpoint']}")
-        logger.error(f"AZURE_OPENAI_DEPLOYMENT_NAME: {config['deployment_name']}")
+        print(f"Environment file not found at {env_path}")
+        print("Please run 'azd up' first to deploy the infrastructure.")
         sys.exit(1)
     
-    logger.info(f"Configuration loaded: {config['deployment_name']} @ {config['capacity']}K TPM")
-    return config
-
-CONFIG = load_configuration()
-
-# ============================================================================
-# AZURE OPENAI AUTHENTICATION SETUP
-# ============================================================================
-
-# Set environment variables for LangChain Azure OpenAI integration
-os.environ["AZURE_OPENAI_API_VERSION"] = CONFIG['api_version']
-os.environ["AZURE_OPENAI_ENDPOINT"] = CONFIG['endpoint']
-os.environ["AZURE_OPENAI_DEPLOYMENT_NAME"] = CONFIG['deployment_name']
-
-# Use DefaultAzureCredential for authentication (works with az login locally and Managed Identity in Azure)
-credential = DefaultAzureCredential()
-
+    load_dotenv(env_path)
+    
+    config = {
+        'endpoint': os.getenv('AZURE_OPENAI_ENDPOINT'),
+        'deployment_name': os.getenv('AZURE_OPENAI_DEPLOYMENT_NAME'),
+        'capacity': int(os.getenv('AZURE_OPENAI_CAPACITY', '40')),
+        'api_version': '2024-02-15-preview'
+    }
+    
+    if not config['endpoint'] or not config['deployment_name']:
+        print("Missing required environment variables")
+        print(f"AZURE_OPENAI_ENDPOINT: {config['endpoint']}")
+        print(f"AZURE_OPENAI_DEPLOYMENT_NAME: {config['deployment_name']}")
+        sys.exit(1)
+    
 # Get token for Azure OpenAI
 try:
     token = credential.get_token("https://cognitiveservices.azure.com/.default")
     os.environ["AZURE_OPENAI_API_KEY"] = token.token
     logger.info("Azure OpenAI authentication configured successfully")
 except Exception as e:
-    logger.error(f"Failed to authenticate with Azure: {e}")
-    logger.info("Please run 'az login' and ensure RBAC roles are assigned")
+except Exception as e:
+    print(f"Failed to authenticate with Azure: {e}")
+    print("Please run 'az login' and ensure RBAC roles are assigned")
     sys.exit(1)
 
 # Create Azure OpenAI model for Deep Agents
@@ -102,10 +85,7 @@ model = AzureChatOpenAI(
     api_version=CONFIG['api_version'],
     azure_endpoint=CONFIG['endpoint'],
     azure_ad_token_provider=lambda: credential.get_token("https://cognitiveservices.azure.com/.default").token
-)
-logger.info(f"Azure OpenAI model configured: {CONFIG['deployment_name']}")
-
-# ============================================================================
+=====
 # DUCKDUCKGO SEARCH WITH PROGRESSIVE BACKOFF
 # ============================================================================
 
@@ -130,8 +110,6 @@ def internet_search(
     
     max_retries = 5
     initial_backoff = 1.0
-    backoff = initial_backoff
-    max_backoff = 60.0
     
     for attempt in range(max_retries):
         try:
@@ -146,8 +124,7 @@ def internet_search(
                 return "No results found for this query."
             
             # Format results
-            results = []
-            for i, r in enumerate(raw_results, 1):
+            resui, r in enumerate(raw_results, 1):
                 title = r.get('title', '')
                 url = r.get('href', r.get('url', ''))
                 snippet = r.get('body', r.get('description', ''))
@@ -161,24 +138,18 @@ def internet_search(
             
             logger.info(f"Successfully retrieved {len(results)} results")
             return "\n".join(results)
-            
-        except Exception as e:
-            logger.warning(f"Search attempt {attempt + 1}/{max_retries} failed: {e}")
+            return "No valid results found after quality filtering."
             
             if attempt < max_retries - 1:
                 sleep_time = min(backoff, max_backoff)
                 logger.info(f"Retrying in {sleep_time:.1f} seconds...")
                 time.sleep(sleep_time)
                 backoff *= 2
+            if attempt < max_retries - 1:
+                sleep_time = min(backoff, max_backoff)
+                time.sleep(sleep_time)
+                backoff *= 2
             else:
-                logger.error(f"All retry attempts exhausted for query: '{query}'")
-                return f"Error: Could not complete search after {max_retries} attempts."
-    
-    return "Search failed after all retries."
-
-# ============================================================================
-# SUBAGENT #1: COMPETITIVE ANALYSIS AGENT
-# ============================================================================
 
 def create_competitive_analysis_agent():
     """
@@ -216,14 +187,11 @@ Focus on providing thorough, data-driven competitive analysis that informs strat
     logger.info("Competitive Analysis subagent created")
     return agent
 
-# ============================================================================
-# SUBAGENT #2: FINANCIAL ANALYSIS AGENT
-# ============================================================================
-
-def create_financial_analysis_agent():
-    """
-    Create a specialized subagent for financial analysis and CoCA calculations.
-    """
+# ==agent = create_deep_agent(
+        tools=[internet_search],
+        system_prompt=system_prompt,
+        model=model
+    )
     
     system_prompt = """You are a Financial Analysis Expert specializing in business metrics and customer acquisition economics.
 
@@ -258,15 +226,12 @@ Focus on providing accurate, actionable financial analysis that supports busines
     return agent
 
 # ============================================================================
-# MAIN ORCHESTRATOR AGENT
-# ============================================================================
-
-def create_main_orchestrator():
-    """
-    Create the main Deep Agent orchestrator with automatic subagent delegation.
-    """
-    
-    system_prompt = """You are an Expert Business Planning Orchestrator AI assistant that helps with business planning, research, and analysis.
+# MAagent = create_deep_agent(
+        tools=[internet_search],
+        system_prompt=system_prompt,
+        model=model
+    )
+    ning Orchestrator AI assistant that helps with business planning, research, and analysis.
 
 You are working on a business planning project focused on customer acquisition and competitive strategy.
 
@@ -305,14 +270,11 @@ Focus on providing high-quality business planning assistance with well-researche
 # EXAMPLE USAGE
 # ============================================================================
 
-def run_example_competitive_analysis():
-    """Example: Competitive analysis task."""
-    
-    logger.info("=" * 70)
-    logger.info("EXAMPLE 1: Competitive Analysis")
-    logger.info("=" * 70)
-    
-    agent = create_main_orchestrator()
+def agent = create_deep_agent(
+        tools=[internet_search],
+        system_prompt=system_prompt,
+        model=model
+    )
     
     query = """Analyze the competitive landscape for project management software tools.
     Focus on the top 3-5 competitors, their pricing models, key features, and market positioning.
@@ -326,18 +288,36 @@ def run_example_competitive_analysis():
     
     response = result["messages"][-1].content
     logger.info(f"\n{'=' * 70}")
-    logger.info("RESULT:")
-    logger.info(f"{'=' * 70}")
-    print(f"\n{response}\n")
+    print("=" * 70)
+    print("EXAMPLE 1: Competitive Analysis")
+    print("=" * 70)
     
-    return response
-
-def run_example_financial_analysis():
-    """Example: Financial analysis task."""
+    agent = create_main_orchestrator()
     
-    logger.info("=" * 70)
-    logger.info("EXAMPLE 2: Financial Analysis (CoCA Calculation)")
-    logger.info("=" * 70)
+    query = """Analyze the competitive landscape for project management software tools.
+    Focus on the top 3-5 competitors, their pricing models, key features, and market positioning.
+    Identify gaps in the market that a new entrant could exploit."""
+    
+    print(f"\nQuery: {query}\n")
+    
+    result = agent.invoke({
+        "messages": [{"role": "user", "content": query}]
+    })
+    
+    response = result["messages"][-1].content
+    print(f"\n{'=' * 70}")
+    print("RESULT:")
+    printmers acquired: 20/month
+    - Research industry benchmarks for B2B SaaS
+    - Provide short-term (monthly), medium-term (quarterly), and long-term (annual) CoCA analysis."""
+    
+    logger.info(f"User Query: {query}")
+    
+    result = agent.invoke({
+        "messages": [{"role": "user", "content": query}]
+    print("=" * 70)
+    print("EXAMPLE 2: Financial Analysis (CoCA Calculation)")
+    print("=" * 70)
     
     agent = create_main_orchestrator()
     
@@ -349,26 +329,26 @@ def run_example_financial_analysis():
     - Research industry benchmarks for B2B SaaS
     - Provide short-term (monthly), medium-term (quarterly), and long-term (annual) CoCA analysis."""
     
-    logger.info(f"User Query: {query}")
+    print(f"\nQuery: {query}\n")
     
     result = agent.invoke({
         "messages": [{"role": "user", "content": query}]
     })
     
     response = result["messages"][-1].content
-    logger.info(f"\n{'=' * 70}")
-    logger.info("RESULT:")
-    logger.info(f"{'=' * 70}")
-    print(f"\n{response}\n")
+    print(f"\n{'=' * 70}")
+    print("RESULT:")
+    printstrategy based on competitor analysis
+    3. Customer acquisition cost projections for first year
+    4. Market positioning and differentiation strategy
     
-    return response
-
-def run_example_mixed_analysis():
-    """Example: Mixed analysis requiring comprehensive research."""
+    Provide a comprehensive analysis with specific recommendations."""
     
-    logger.info("=" * 70)
-    logger.info("EXAMPLE 3: Comprehensive Business Plan Analysis")
-    logger.info("=" * 70)
+    logger.info(f"User Query: {query}")
+    
+    print("=" * 70)
+    print("EXAMPLE 3: Comprehensive Business Plan Analysis")
+    print("=" * 70)
     
     agent = create_main_orchestrator()
     
@@ -382,33 +362,33 @@ def run_example_mixed_analysis():
     
     Provide a comprehensive analysis with specific recommendations."""
     
-    logger.info(f"User Query: {query}")
+    print(f"\nQuery: {query}\n")
     
     result = agent.invoke({
         "messages": [{"role": "user", "content": query}]
     })
     
     response = result["messages"][-1].content
-    logger.info(f"\n{'=' * 70}")
-    logger.info("RESULT:")
-    logger.info(f"{'=' * 70}")
-    print(f"\n{response}\n")
-    
-    return response
-
-# ============================================================================
-# MAIN ENTRY POINT
-# ============================================================================
-
-def main():
-    """Main entry point - run example scenarios."""
-    
-    logger.info("=" * 70)
-    logger.info("BUSINESS PLAN CREATOR - DEEP AGENTS SYSTEM")
-    logger.info("=" * 70)
-    logger.info(f"Started at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    logger.info(f"Azure OpenAI: {CONFIG['deployment_name']} @ {CONFIG['capacity']}K TPM")
-    logger.info("=" * 70)
+    print(f"\n{'=' * 70}")
+    print("RESULT:")
+    print
+    try:
+        # Run example scenarios demonstrating Deep Agents capabilities
+        
+        # Example 1: Competitive analysis
+        print("\n\n")
+        run_example_competitive_analysis()
+        
+        # Example 2: Financial analysis
+        print("\n\n")
+        run_example_financial_analysis()
+        
+    print("=" * 70)
+    print("BUSINESS PLAN CREATOR - DEEP AGENTS SYSTEM")
+    print("=" * 70)
+    print(f"Started at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    print(f"Azure OpenAI: {CONFIG['deployment_name']} @ {CONFIG['capacity']}K TPM")
+    print("=" * 70)
     
     try:
         # Run example scenarios demonstrating Deep Agents capabilities
@@ -425,16 +405,12 @@ def main():
         print("\n\n")
         run_example_mixed_analysis()
         
-        logger.info("\n" + "=" * 70)
-        logger.info("ALL EXAMPLES COMPLETED SUCCESSFULLY")
-        logger.info("=" * 70)
+        print("\n" + "=" * 70)
+        print("ALL EXAMPLES COMPLETED SUCCESSFULLY")
+        print("=" * 70)
         
     except KeyboardInterrupt:
-        logger.info("\nInterrupted by user")
+        print("\nInterrupted by user")
         sys.exit(0)
     except Exception as e:
-        logger.error(f"\nError during execution: {e}", exc_info=True)
-        sys.exit(1)
-
-if __name__ == "__main__":
-    main()
+        print(f"\nError during execution: {e}"
