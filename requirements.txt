@@ -1,0 +1,18 @@
+# Core Dependencies
+deepagents>=0.3.9
+duckduckgo-search>=6.3.0
+
+# Azure Authentication & OpenAI
+azure-identity>=1.19.0
+openai>=1.58.1
+
+# Environment Management
+python-dotenv>=1.0.0
+
+# Rate Limiting
+ratelimit>=2.2.1
+
+# Optional: Enhanced logging and monitoring
+coloredlogs>=15.0.1
+
+# Note: Requires Python 3.11+ for deepagents package

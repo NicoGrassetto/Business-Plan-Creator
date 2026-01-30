@@ -1,0 +1,10 @@
+name: business-plan-creator
+metadata:
+  template: business-plan-creator@0.0.1
+
+# Infrastructure as Code location
+infra:
+  path: infra
+  
+# Default environment name for local development
+defaultEnvironment: dev
